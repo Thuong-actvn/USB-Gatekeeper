@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <linux/netlink.h>
+#include <termios.h>
 #include "../netlink_proto.h"
 
 #define MAX_PAYLOAD 1024
@@ -82,6 +83,8 @@ int main() {
             fflush(stdout);
             
             char input[10];
+            tcflush(STDIN_FILENO, TCIFLUSH);
+            
             if (fgets(input, sizeof(input), stdin) == NULL) {
                 break; /* Nếu là EOF thì ngắt loop */
             }
@@ -99,7 +102,7 @@ int main() {
             reply->busnum = saved_busnum;
             reply->devnum = saved_devnum;
             
-            if (input[0] == 'y' || input[0] == 'Y' || input[0] == '\n') { // Default to Allow on Enter
+            if (input[0] == 'y' || input[0] == 'Y' || input[0] == '\n' || input[0] == '\r') { // Default to Allow on Enter
                 reply->action = ACTION_ALLOW;
                 printf("[+] Đã gửi tín hiệu CHO PHÉP cho Bus %d Dev %d xuống Kernel module.\n", reply->busnum, reply->devnum);
             } else {
