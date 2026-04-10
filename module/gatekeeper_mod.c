@@ -13,44 +13,46 @@ MODULE_DESCRIPTION("USB Gatekeeper");
 MODULE_VERSION("1.0");
 
 static struct sock *nl_sk = NULL;
-static int user_pid = 0; /* Lưu PID của ứng dụng User Space */
+static int user_pid = 0;
 
 /* Hàm Helper bằng bash để kiểm soát sysfs do các API nội bộ không phải lúc nào cũng được export */
-static void k_set_usb_authorized_default(int val)
-{
+static void k_set_usb_authorized_default(int val) {
     char cmd[256];
     char *argv[] = { "/bin/sh", "-c", cmd, NULL };
     char *envp[] = { "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL };
     
-    snprintf(cmd, sizeof(cmd), 
-        "echo %d > /sys/module/usbcore/parameters/authorized_default 2>/dev/null; "
-        "for f in /sys/bus/usb/devices/usb*/authorized_default; do echo %d > \"$f\" 2>/dev/null; done", 
-        val, val);
-    
+    snprintf(cmd, sizeof(cmd),
+    "echo %d > /sys/module/usbcore/parameters/authorized_default 2>/dev/null; "
+    "for f in /sys/bus/usb/devices/usb*/authorized_default; do "
+    "  echo %d > \"$f\" 2>/dev/null; "
+    "done",
+    val, val);
+
     call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
 }
 
-static void k_authorize_usb(int busnum, int devnum) 
-{
+static void k_authorize_usb(int busnum, int devnum) {
     char cmd[512];
     char *argv[] = { "/bin/sh", "-c", cmd, NULL };
     char *envp[] = { "HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL };
     
-    /* Chạy kịch bản shell duyệt qua USB dev, dùng 'read' tích hợp của shell thay vì 'cat' (tạo tiến trình con làm chậm hệ thống) */
     snprintf(cmd, sizeof(cmd),
-        "for d in /sys/bus/usb/devices/*; do "
-        "if [ -f \"$d/busnum\" ] && [ -f \"$d/devnum\" ]; then "
-        "read b < \"$d/busnum\"; read v < \"$d/devnum\"; "
-        "if [ \"$b\" = \"%d\" ] && [ \"$v\" = \"%d\" ]; then "
-        "echo 1 > \"$d/authorized\" 2>/dev/null; break; fi; fi; done",
-        busnum, devnum);
-        
+    "for d in /sys/bus/usb/devices/*; do "
+    "  if [ -f \"$d/busnum\" ] && [ -f \"$d/devnum\" ]; then "
+    "    read b < \"$d/busnum\"; read v < \"$d/devnum\"; "
+    "    if [ \"$b\" = \"%d\" ] && [ \"$v\" = \"%d\" ]; then "
+    "      echo 1 > \"$d/authorized\" 2>/dev/null; "
+    "      break; "
+    "    fi; "
+    "  fi; "
+    "done",
+    busnum, devnum);
+
     call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
-}
+} // quét qua các thiết bị USB, tìm đúng busnum và devnum truyền vào rồi set authorized = 1
 
 /* Xử lý khi nhận bản tin từ User Space */
-static void nl_recv_msg(struct sk_buff *skb)
-{
+static void nl_recv_msg(struct sk_buff *skb) {
     struct nlmsghdr *nlh;
     struct gatekeeper_msg *msg;
     
@@ -62,7 +64,7 @@ static void nl_recv_msg(struct sk_buff *skb)
         
     msg = (struct gatekeeper_msg *)nlmsg_data(nlh);
     if (msg->action == ACTION_HELLO) {
-        user_pid = nlh->nlmsg_pid;
+        user_pid = NETLINK_CB(skb).portid;
         pr_info("USB-Gatekeeper: Ứng dụng User Space (PID %d) đã kết nối\n", user_pid);
     } 
     else if (msg->action == ACTION_ALLOW) {
@@ -71,7 +73,7 @@ static void nl_recv_msg(struct sk_buff *skb)
     } 
     else if (msg->action == ACTION_DENY) {
         pr_info("USB-Gatekeeper: Người dùng CHẶN thiết bị (Bus: %d, Dev: %d)\n", msg->busnum, msg->devnum);
-        // Với lệnh DENY ta không làm gì vì default là block
+        
     }
 }
 
@@ -83,28 +85,29 @@ static int usb_notify(struct notifier_block *self, unsigned long action, void *d
     struct nlmsghdr *nlh;
     struct gatekeeper_msg *msg;
     int res;
+    u16 idVendor, idProduct;
+    const char *manufacturer, *product, *serial;
     
     if (action != USB_DEVICE_ADD && action != USB_DEVICE_REMOVE)
         return NOTIFY_OK;
+
+    idVendor = le16_to_cpu(udev->descriptor.idVendor);
+    idProduct = le16_to_cpu(udev->descriptor.idProduct);
+    manufacturer = udev->manufacturer ? udev->manufacturer : "N/A";
+    product = udev->product ? udev->product : "N/A";
+    serial = udev->serial ? udev->serial : "N/A";
         
     if (action == USB_DEVICE_ADD) {
         pr_info("USB-Gatekeeper: Thiết bị USB mới cắm (VID: %04x, PID: %04x, Hãng: %s, Tên: %s, Serial: %s)\n", 
-               le16_to_cpu(udev->descriptor.idVendor), 
-               le16_to_cpu(udev->descriptor.idProduct),
-               udev->manufacturer ? udev->manufacturer : "N/A",
-               udev->product ? udev->product : "N/A",
-               udev->serial ? udev->serial : "N/A");
+               idVendor, idProduct, manufacturer, product, serial);
     } else {
         pr_info("USB-Gatekeeper: Thiết bị USB bị rút (VID: %04x, PID: %04x, Hãng: %s, Tên: %s)\n", 
-               le16_to_cpu(udev->descriptor.idVendor), 
-               le16_to_cpu(udev->descriptor.idProduct),
-               udev->manufacturer ? udev->manufacturer : "N/A",
-               udev->product ? udev->product : "N/A");
+               idVendor, idProduct, manufacturer, product);
     }
            
     if (user_pid == 0) {
         if (action == USB_DEVICE_ADD) {
-            pr_info("USB-Gatekeeper: Không có ứng dụng lằng nghe, thiết bị bị chặn.\n");
+            pr_info("USB-Gatekeeper: User space app not running\n");
         }
         return NOTIFY_OK;
     }
@@ -123,17 +126,17 @@ static int usb_notify(struct notifier_block *self, unsigned long action, void *d
     msg->action = (action == USB_DEVICE_ADD) ? ACTION_NOTIFY : ACTION_REMOVE;
     msg->busnum = udev->bus->busnum;
     msg->devnum = udev->devnum;
-    msg->idVendor = le16_to_cpu(udev->descriptor.idVendor);
-    msg->idProduct = le16_to_cpu(udev->descriptor.idProduct);
+    msg->idVendor = idVendor;
+    msg->idProduct = idProduct;
 
-    if (udev->manufacturer) {
-        strncpy(msg->manufacturer, udev->manufacturer, sizeof(msg->manufacturer) - 1);
+    if (strcmp(manufacturer, "N/A") != 0) {
+        strncpy(msg->manufacturer, manufacturer, sizeof(msg->manufacturer) - 1);
     }
-    if (udev->product) {
-        strncpy(msg->product, udev->product, sizeof(msg->product) - 1);
+    if (strcmp(product, "N/A") != 0) {
+        strncpy(msg->product, product, sizeof(msg->product) - 1);
     }
-    if (udev->serial) {
-        strncpy(msg->serial, udev->serial, sizeof(msg->serial) - 1);
+    if (strcmp(serial, "N/A") != 0) {
+        strncpy(msg->serial, serial, sizeof(msg->serial) - 1);
     }
     
     /* Bắn unicast về app */
@@ -164,9 +167,9 @@ static int __init gatekeeper_init(void)
     
     usb_register_notify(&usb_nb);
     
-    /* Chặn USB mặc định */
+    /* Mặc định chặn thiết bị mới*/
     k_set_usb_authorized_default(0);
-    pr_info("USB-Gatekeeper: Module tải thành công. MỌI USB MỚI SẼ KẾT NỐI BỊ CHẶN.\n");
+    pr_info("USB-Gatekeeper: Module tải thành công.\n");
     
     return 0;
 }
@@ -176,10 +179,11 @@ static void __exit gatekeeper_exit(void)
     netlink_kernel_release(nl_sk);
     usb_unregister_notify(&usb_nb);
     
-    /* Khi unload module, khôi phục lại cơ chế USB bình thường */
+    //reset cờ khi unload module
     k_set_usb_authorized_default(1);
-    pr_info("USB-Gatekeeper: Module gỡ bỏ! Reset authorized_default = 1.\n");
+    pr_info("USB-Gatekeeper: Reset authorized_default = 1.\n");
 }
 
 module_init(gatekeeper_init);
 module_exit(gatekeeper_exit);
+

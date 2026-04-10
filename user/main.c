@@ -20,7 +20,7 @@ int main() {
 
     sock_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_USB_GATEKEEPER);
     if (sock_fd < 0) {
-        perror("[-] Lỗi tạo socket Netlink (Hãy thử chạy với sudo)");
+        perror("[-] Lỗi tạo socket Netlink");
         return -1;
     }
 
@@ -42,7 +42,7 @@ int main() {
     nlh = (struct nlmsghdr *)malloc(NLMSG_SPACE(MAX_PAYLOAD));
     memset(nlh, 0, NLMSG_SPACE(MAX_PAYLOAD));
     nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
-    nlh->nlmsg_pid = getpid();
+    nlh->nlmsg_pid = 0;
     nlh->nlmsg_flags = 0;
 
     gk_data = (struct gatekeeper_msg *)NLMSG_DATA(nlh);
@@ -57,11 +57,11 @@ int main() {
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
 
-    printf("[+] Cổng Netlink gửi tín hiệu Hello lên Kernel (PID: %d)...\n", getpid());
+    printf("[+] Cổng Netlink gửi tín hiệu kết nối Kernel...\n");
     sendmsg(sock_fd, &msg, 0);
 
-    printf("[+] U-Gatekeeper sẵn sàng lắng nghe USB.\n");
-    printf("[+] Thoát bằng Ctrl+C. Hệ thống vẫn duy trì khóa các thiết bị cắm mới cho tới khi bạn unload kernel module.\n");
+    printf("[+] U-Gatekeeper sẵn sàng.\n");
+    
 
     /* Loop lắng nghe kernel */
     while (1) {
@@ -72,21 +72,28 @@ int main() {
 
         if (gk_data->action == ACTION_NOTIFY) {
             printf("\n------------------------------------------------\n");
-            printf("[!] TÌM THẤY THIẾT BỊ MỚI:\n");
+            printf("[!] THIẾT BỊ MỚI:\n");
             printf("    Bus ID: %d | Device Num: %d\n", gk_data->busnum, gk_data->devnum);
             printf("    VID: %04x | PID: %04x\n", gk_data->idVendor, gk_data->idProduct);
-            printf("    Hãng sản xuất: %s\n", strlen(gk_data->manufacturer) > 0 ? gk_data->manufacturer : "Không có");
-            printf("    Tên sản phẩm:  %s\n", strlen(gk_data->product) > 0 ? gk_data->product : "Không có");
-            printf("    Số Serial:     %s\n", strlen(gk_data->serial) > 0 ? gk_data->serial : "Không có");
+            printf("    Manufacturer: %s\n", strlen(gk_data->manufacturer) > 0 ? gk_data->manufacturer : "N/A");
+            printf("    Product:  %s\n", strlen(gk_data->product) > 0 ? gk_data->product : "N/A");
+            printf("    Serial:     %s\n", strlen(gk_data->serial) > 0 ? gk_data->serial : "N/A");
             
-            printf("\n    [?] Bạn có CHO PHÉP (ALLOW) thiết bị này? (Y/n): ");
+            printf("\n    [?] CHO PHÉP thiết bị này? (Y/n): ");
             fflush(stdout);
             
             char input[10];
-            tcflush(STDIN_FILENO, TCIFLUSH);
+            tcflush(STDIN_FILENO, TCIFLUSH); /* Xóa buffer terminal */
+            fflush(stdin);                   /* Xóa buffer stdio */
             
             if (fgets(input, sizeof(input), stdin) == NULL) {
-                break; /* Nếu là EOF thì ngắt loop */
+                break;
+            }
+            
+            /* Đọc hết ký tự thừa nếu nhập quá dài */
+            if (strchr(input, '\n') == NULL) {
+                int ch;
+                while ((ch = fgetc(stdin)) != '\n' && ch != EOF);
             }
             
             int saved_busnum = gk_data->busnum;
@@ -95,7 +102,7 @@ int main() {
             /* Gửi respond ngược cho kernel */
             memset(nlh, 0, NLMSG_SPACE(MAX_PAYLOAD));
             nlh->nlmsg_len = NLMSG_SPACE(MAX_PAYLOAD);
-            nlh->nlmsg_pid = getpid();
+            nlh->nlmsg_pid = 0;
             nlh->nlmsg_flags = 0;
             
             struct gatekeeper_msg *reply = (struct gatekeeper_msg *)NLMSG_DATA(nlh);
@@ -104,10 +111,10 @@ int main() {
             
             if (input[0] == 'y' || input[0] == 'Y' || input[0] == '\n' || input[0] == '\r') { // Default to Allow on Enter
                 reply->action = ACTION_ALLOW;
-                printf("[+] Đã gửi tín hiệu CHO PHÉP cho Bus %d Dev %d xuống Kernel module.\n", reply->busnum, reply->devnum);
+                printf("[+] Đã gửi tín hiệu CHO PHÉP.\n");
             } else {
                 reply->action = ACTION_DENY;
-                printf("[-] Đã gửi tín hiệu CHẶN thiết bị xuống Kernel module.\n");
+                printf("[-] Đã gửi tín hiệu CHẶN.\n");
             }
             
             sendmsg(sock_fd, &msg, 0);
@@ -116,9 +123,9 @@ int main() {
             printf("[-] THIẾT BỊ VỪA BỊ RÚT RA:\n");
             printf("    Bus ID: %d | Device Num: %d\n", gk_data->busnum, gk_data->devnum);
             printf("    VID: %04x | PID: %04x\n", gk_data->idVendor, gk_data->idProduct);
-            printf("    Hãng sản xuất: %s\n", strlen(gk_data->manufacturer) > 0 ? gk_data->manufacturer : "Không có");
-            printf("    Tên sản phẩm:  %s\n", strlen(gk_data->product) > 0 ? gk_data->product : "Không có");
-            printf("    Số Serial:     %s\n", strlen(gk_data->serial) > 0 ? gk_data->serial : "Không có");
+            printf("    Manufacturer: %s\n", strlen(gk_data->manufacturer) > 0 ? gk_data->manufacturer : "N/A");
+            printf("    Product:  %s\n", strlen(gk_data->product) > 0 ? gk_data->product : "N/A");
+            printf("    Serial:     %s\n", strlen(gk_data->serial) > 0 ? gk_data->serial : "N/A");
             printf("------------------------------------------------\n");
         }
     }
