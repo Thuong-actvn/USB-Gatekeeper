@@ -18,6 +18,11 @@ int main() {
     struct msghdr msg;
     struct gatekeeper_msg *gk_data;
 
+    if (geteuid() != 0) {
+        fprintf(stderr, "Yêu cầu quyền root\n");
+        return -1;
+    }
+
     sock_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_USB_GATEKEEPER);
     if (sock_fd < 0) {
         perror("[-] Lỗi tạo socket Netlink");

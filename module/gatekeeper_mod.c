@@ -5,6 +5,7 @@
 #include <linux/usb.h>
 #include <net/sock.h>
 #include <linux/sched.h>
+#include <linux/capability.h>
 #include "../netlink_proto.h"
 
 MODULE_LICENSE("GPL");
@@ -57,6 +58,13 @@ static void nl_recv_msg(struct sk_buff *skb) {
     struct gatekeeper_msg *msg;
     
     nlh = (struct nlmsghdr *)skb->data;
+    
+    /* Kiểm tra quyền của tiến trình gửi (Yêu cầu quyền root) */
+    if (!capable(CAP_SYS_ADMIN)) {
+        pr_warn("USB-Gatekeeper: Truy cập bị từ chối - Yêu cầu quyền root!\n");
+        return;
+    }
+
     
     /* Kiểm tra chiều dài hợp lệ */
     if (nlh->nlmsg_len < NLMSG_SPACE(sizeof(struct gatekeeper_msg)))
