@@ -59,13 +59,12 @@ static void nl_recv_msg(struct sk_buff *skb) {
     
     nlh = (struct nlmsghdr *)skb->data;
     
-    /* Kiểm tra quyền của tiến trình gửi (Yêu cầu quyền root) */
-    if (!capable(CAP_SYS_ADMIN)) {
+    /* Kiểm tra quyền root*/
+    if (!netlink_capable(skb, CAP_SYS_ADMIN)) {
         pr_warn("USB-Gatekeeper: Truy cập bị từ chối - Yêu cầu quyền root!\n");
         return;
     }
 
-    
     /* Kiểm tra chiều dài hợp lệ */
     if (nlh->nlmsg_len < NLMSG_SPACE(sizeof(struct gatekeeper_msg)))
         return;

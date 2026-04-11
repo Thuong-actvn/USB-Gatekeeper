@@ -1,0 +1,14 @@
+#file path: /etc/systemd/system/<file_name>.service
+[Unit]
+Description=USB Gatekeeper User Daemon
+After=network.target
+
+[Service]
+Type=simple
+# Your path to user_app
+ExecStart=/path/to/user_app
+Restart=on-failure
+User=root
+
+[Install]
+WantedBy=multi-user.target
